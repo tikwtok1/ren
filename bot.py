@@ -1,10 +1,10 @@
-hereimport os
+import os
 import logging
 import asyncio
+import subprocess
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from pytubefix import YouTube
-from pytubefix.cli import on_progress
 from aiohttp import web
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -16,25 +16,23 @@ PORT = int(os.environ.get("PORT", 8080))
 user_data = {}
 
 def get_video_info(url: str):
-    yt = YouTube(url, on_progress_callback=on_progress)
-    # نجبر استخدام عميل android لتجنب الحظر
-    yt.bypass_age_gate()  # محاولة لتجاوز قيود العمر إن وجدت
+    yt = YouTube(url)
     return yt
 
 def build_quality_buttons(yt: YouTube):
-    streams = yt.streams.filter(progressive=False, type="video").order_by('resolution').desc()
-    # نجمع دقات فريدة مع الصوت
+    # نجمع كل التدفقات المتاحة (فيديو مع/بدون صوت) مع إظهار الجودة الحقيقية
+    streams = yt.streams.filter(type="video").order_by('resolution').desc()
     qualities = {}
     for s in streams:
         if s.resolution and int(s.resolution.replace('p','')) >= 144:
-            has_audio = s.is_progressive or s.audio_codec is not None
-            label = f"{s.resolution}{' 🔊' if has_audio else ''}"
+            has_audio = s.is_progressive  # progressive يحتوي على صوت دائمًا
+            label = f"{s.resolution}{' 🔊' if has_audio else ' (بدون صوت)'}"
             if label not in qualities:
                 qualities[label] = s
     buttons = []
     for label, stream in sorted(qualities.items(), key=lambda x: int(x[0].split('p')[0]), reverse=True):
         buttons.append([InlineKeyboardButton(f"🎥 {label}", callback_data=f"vid_{stream.itag}")])
-    # خيار الصوت فقط
+    # صوت فقط
     audio_stream = yt.streams.get_audio_only()
     if audio_stream:
         buttons.append([InlineKeyboardButton("🎵 تحميل الصوت (MP4)", callback_data=f"aud_{audio_stream.itag}")])
@@ -87,29 +85,51 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if type_ == 'aud':
             stream = yt.streams.get_by_itag(itag)
-        else:
-            stream = yt.streams.get_by_itag(itag)
-
-        # تحميل الملف
-        out_file = stream.download(output_path='/tmp', filename_prefix='yt_')
-        # لو التحميل رجع None ننتظر قليلاً (نادر)
-        if not out_file:
-            raise Exception("Download returned None")
-        # قد يكون الملف بدون امتداد صحيح
-        if type_ == 'aud':
-            # تحويل لصوت فقط إذا أمكن (لكن عادة stream الصوت يكون بصيغة mp4)
+            out_file = stream.download(output_path='/tmp', filename_prefix='yt_')
             final_file = out_file
         else:
-            final_file = out_file
+            # تحميل الفيديو مع الصوت إذا كان progressive، وإلا دمج مع أفضل صوت
+            video_stream = yt.streams.get_by_itag(itag)
+            if video_stream.is_progressive:
+                # يحتوي على صوت، تحميل مباشر
+                out_file = video_stream.download(output_path='/tmp', filename_prefix='yt_')
+                final_file = out_file
+            else:
+                # فيديو فقط، نحمّل أفضل صوت وندمج بـ ffmpeg
+                audio_stream = yt.streams.get_audio_only()
+                if not audio_stream:
+                    await query.edit_message_caption("❌ لا يوجد تدفق صوتي للدمج.")
+                    return
+                video_path = video_stream.download(output_path='/tmp', filename_prefix='vid_')
+                audio_path = audio_stream.download(output_path='/tmp', filename_prefix='aud_')
+                merged_path = f"/tmp/merged_{itag}.mp4"
+                # دمج بـ ffmpeg
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", video_path,
+                    "-i", audio_path,
+                    "-c:v", "copy",
+                    "-c:a", "aac",
+                    "-shortest",
+                    merged_path
+                ]
+                proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                stdout, stderr = await proc.communicate()
+                if proc.returncode != 0:
+                    raise Exception(f"FFmpeg merge failed: {stderr.decode()[:200]}")
+                # تنظيف الملفات المؤقتة
+                os.remove(video_path)
+                os.remove(audio_path)
+                final_file = merged_path
 
+        # فحص الحجم
         file_size = os.path.getsize(final_file)
-        max_size = 50 * 1024 * 1024  # 50MB
-        if file_size > max_size:
+        if file_size > 50 * 1024 * 1024:
             os.remove(final_file)
             await query.edit_message_caption("❌ حجم الملف أكبر من 50 ميجابايت. جرب جودة أقل.")
             return
 
-        # إرسال الملف
+        # إرسال
         with open(final_file, 'rb') as f:
             if type_ == 'aud':
                 await context.bot.send_audio(chat_id, f, title=yt.title, performer=yt.author)
