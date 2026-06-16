@@ -6,7 +6,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from aiohttp import web
 
-# إعداد التسجيل
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
@@ -15,10 +14,8 @@ logger = logging.getLogger(__name__)
 TOKEN = "8868474021:AAFuT8wnMxq8EdC9keC4o19uMLa2C5e3BQg"
 PORT = int(os.environ.get("PORT", 8080))
 
-# تخزين مؤقت للبيانات
 user_data = {}
 
-# ---------- دوال يوتيوب ----------
 def extract_formats(url: str):
     ydl_opts = {
         'quiet': True,
@@ -59,7 +56,6 @@ def build_quality_buttons(info):
     buttons.append([InlineKeyboardButton("❌ إلغاء", callback_data="cancel")])
     return buttons
 
-# ---------- أوامر البوت ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🎬 أرسل رابط فيديو يوتيوب لتحميله.\nيمكنك اختيار الجودة أو تحميل الصوت فقط.")
 
@@ -101,7 +97,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = uinfo['url']
     info = uinfo['info']
     format_id = data.split('_')[1]
-    type_ = data.split('_')[0]  # vid or aud
+    type_ = data.split('_')[0]
     await query.edit_message_caption("⏳ جاري التحميل...")
     ydl_opts = {
         'outtmpl': '%(title)s.%(ext)s',
@@ -118,11 +114,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if type_ == 'aud':
         ydl_opts['format'] = 'bestaudio/best'
         ydl_opts['postprocessors'] = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
-        file_extension = '.mp3'
     else:
         ydl_opts['format'] = f'{format_id}+bestaudio/best'
         ydl_opts['merge_output_format'] = 'mp4'
-        file_extension = '.mp4'
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
@@ -147,35 +141,28 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("Download error")
         await query.edit_message_caption(f"❌ فشل التحميل.\n{str(e)[:300]}")
 
-# ---------- خادم ويب بسيط للفحص الصحي ----------
 async def health_check(request):
     return web.Response(text="Bot is running")
 
-def start_web_server():
-    app = web.Application()
-    app.router.add_get('/', health_check)
-    runner = web.AppRunner(app)
-    return runner
-
 async def main():
-    # إعداد بوت تيليجرام
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
     application.add_handler(CallbackQueryHandler(button_callback))
 
-    # إعداد خادم الويب
-    runner = start_web_server()
+    # تشغيل خادم الويب
+    app_web = web.Application()
+    app_web.router.add_get('/', health_check)
+    runner = web.AppRunner(app_web)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
     logger.info(f"Web server running on port {PORT}")
 
-    # تشغيل البوت (polling)
+    # بدء البوت
     async with application:
         await application.start()
         await application.updater.start_polling(drop_pending_updates=True)
-        # إبقاء البوت والخادم يعملان للأبد
         while True:
             await asyncio.sleep(3600)
 
