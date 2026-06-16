@@ -24,8 +24,9 @@ def extract_formats(url: str):
         'simulate': True,
         'no_cookies': True,
         'cookies_from_browser': None,
+        'extractor_args': {'youtube': {'player_client': ['android']}},
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
         }
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -105,8 +106,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'no_warnings': True,
         'no_cookies': True,
         'cookies_from_browser': None,
+        'extractor_args': {'youtube': {'player_client': ['android']}},
         'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
         },
         'merge_output_format': 'mp4',
         'socket_timeout': 30,
@@ -150,7 +152,6 @@ async def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
     application.add_handler(CallbackQueryHandler(button_callback))
 
-    # تشغيل خادم الويب
     app_web = web.Application()
     app_web.router.add_get('/', health_check)
     runner = web.AppRunner(app_web)
@@ -159,7 +160,6 @@ async def main():
     await site.start()
     logger.info(f"Web server running on port {PORT}")
 
-    # بدء البوت
     async with application:
         await application.start()
         await application.updater.start_polling(drop_pending_updates=True)
