@@ -7,3 +7,5 @@ services:
     envVars:
       - key: PORT
         value: 8080
+      - key: PYTHON_VERSION
+        value: 3.12.5
